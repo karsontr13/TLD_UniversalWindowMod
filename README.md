@@ -8,4 +8,5 @@ Currently, only window images of the hunter's cabin and camp office in the Myste
 
 1. Click on the **Releases** section on the right and select the latest version.
 2. Download the `.zip` file for that version.
-3. Copy the `.dll` file and the `WindowTextures` folder extracted from the zip file into the `mods` folder in the directory where The Long Dark is installed. 4. Launch the game and enjoy the dynamic windows!
+3. Copy the `.dll` file and the `WindowTextures` folder extracted from the zip file into the `mods` folder in the directory where The Long Dark is installed.
+4. Launch the game and enjoy the dynamic windows!
