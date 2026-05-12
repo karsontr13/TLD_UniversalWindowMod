@@ -1,4 +1,4 @@
-﻿using Il2Cpp;
+using Il2Cpp;
 using Il2CppInterop.Runtime.Injection;
 using Il2CppNodeCanvas.Tasks.Actions;
 using MelonLoader;
@@ -332,12 +332,12 @@ namespace UniversalWindowMod
             }
             else if (exteriorDaylight < 0.5f)
             {
-                // DÜZELTME: Gündüz videosunun karanlıkta boğulmasını önlüyoruz.
-                // Çarpanı 0.3f'ten 0.4f'e çektik (renk çok kararmasın).
+                // FIX: Prevent the daytime video from drowning in darkness during twilight.
+                // Increased the multiplier from 0.3f to 0.4f to retain color integrity.
                 currentTint *= (exteriorDaylight + 0.4f);
 
-                // İŞTE KRİTİK NOKTA: Gündüz videosunun ışığı 0.80f'in altına düşemez.
-                // Böylece gece videosu (0.85f) girdiğinde parlaklık sıçraması yaşanmaz!
+                // CRITICAL POINT: The exposure of the daytime video cannot drop below 0.80f.
+                // This prevents a jarring brightness spike when the night video variant (0.85f) kicks in!
                 currentExposure = Mathf.Max(baseExposure, 0.80f);
             }
 
@@ -351,21 +351,21 @@ namespace UniversalWindowMod
             }
             else if (exteriorDaylight < 0.5f)
             {
-                // Aynı alt sınır korumasını yeni gelecek video için de yapıyoruz.
+                // Apply the same lower-bound exposure protection for the incoming target video.
                 targetTint *= (exteriorDaylight + 0.4f);
                 targetExposure = Mathf.Max(baseExposure, 0.80f);
             }
 
-            // 5. GEÇİŞ VE UYGULAMA
+            // TRANSITION AND APPLICATION
             if (isTransitioning && !isWaitingToPrepare)
             {
                 fadeTimer += Time.deltaTime;
                 float alphaProgress = Mathf.Clamp01(fadeTimer / transitionDuration);
 
-                // İsimler düzeltildi: currentExposure ve targetExposure
                 float blendedExposure = Mathf.Lerp(currentExposure, targetExposure, alphaProgress);
 
-                // GEÇİŞ ESNASINDA: Karartmayı RGB'ye uyguluyoruz, Alpha'yı ise SADECE geçiş (1->0 ve 0->1) için kullanıyoruz.
+                // DURING TRANSITION: Apply exposure dimming directly to RGB values. 
+                // Alpha is ONLY used for the actual crossfade blend (1->0 and 0->1).
                 Color fadeOldTint = new Color(currentTint.r * blendedExposure, currentTint.g * blendedExposure, currentTint.b * blendedExposure, 1f - alphaProgress);
                 myMaterial.SetColor("_Color", fadeOldTint);
 
@@ -376,9 +376,9 @@ namespace UniversalWindowMod
             }
             else
             {
-                // NORMAL OYNATIM ESNASINDA: 
-                // Alpha değerini her zaman KESİN olarak 1.0f (Tam Katı) yapıyoruz. 
-                // Karartma işlemini direkt RGB renklerinin şiddetini azaltarak uyguluyoruz.
+                // DURING NORMAL PLAYBACK: 
+                // Always set Alpha STRICTLY to 1.0f (Fully Opaque) to avoid rendering issues. 
+                // Dimming is applied purely by reducing the intensity of the RGB channels.
                 Color finalSolidTint = new Color(currentTint.r * currentExposure, currentTint.g * currentExposure, currentTint.b * currentExposure, 1.0f);
                 myMaterial.SetColor("_Color", finalSolidTint);
             }
@@ -733,7 +733,7 @@ namespace UniversalWindowMod
 
             if (baseSceneName == "CampOffice")
             {
-                // Camp Office için yükseklik (Y) değerini 1.65'ten 1.85'e çıkardık.
+                // Increased the height (Y) value for Camp Office from 1.65 to 1.85 to properly fill the frame.
                 finalX = 1.55f; finalY = 1.85f;
                 if (index == 0) { finalX = -1.55f; finalY = -1.85f; }
                 else if (index == 2 || index == 5 || index == 7) { finalX = -1.55f; }
@@ -753,9 +753,9 @@ namespace UniversalWindowMod
                     if (sY < 0.05f) { h = sZ; w = sX; }
                     else if (sX < 0.05f) { w = sZ; h = sY; }
 
-                    // DÜZELTME BURADA:
-                    // Sağ/sol (X) için 1.15f (%15) yetti, onu koruyoruz.
-                    // Alt/üst (Y) için yetmemiş, onu 1.35f (%35) yaparak dikeyde iyice uzatıyoruz.
+                    // FIX HERE:
+                    // 1.15f (15%) was enough for horizontal (X) padding, keeping it.
+                    // Vertical (Y) padding wasn't enough, increasing it to 1.35f (35%) to stretch the texture properly.
                     finalX = w * 1.15f;
                     finalY = h * 1.35f;
 
