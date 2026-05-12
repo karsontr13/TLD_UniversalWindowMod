@@ -1,12 +1,13 @@
+﻿using Il2Cpp;
+using Il2CppInterop.Runtime.Injection;
+using Il2CppNodeCanvas.Tasks.Actions;
+using MelonLoader;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using MelonLoader;
 using UnityEngine;
 using UnityEngine.Video;
-using Il2Cpp;
-using Il2CppInterop.Runtime.Injection;
 
 [assembly: MelonInfo(typeof(UniversalWindowMod.WindowModMain), "TLD Universal Dynamic Windows", "2.4.0", "KarsonTR")]
 [assembly: MelonGame("Hinterland", "TheLongDark")]
@@ -25,7 +26,7 @@ namespace UniversalWindowMod
         private Material myMaterial;
         private Weather weather;
         private TimeOfDay timeOfDay;
-        private Wind wind; // Added wind component for dynamic weather handling
+        private Wind wind;
 
         private VideoPlayer vp1;
         private VideoPlayer vp2;
@@ -43,10 +44,7 @@ namespace UniversalWindowMod
 
         private bool playingIsNightVariant = false;
         private bool targetIsNightVariant = false;
-
-        // Track the full path of the currently playing video to prevent unnecessary transitions
         private string currentPlayingVideoPath = "";
-
         private float weatherCheckTimer = 0f;
 
         private GameObject fadeScreen;
@@ -70,7 +68,7 @@ namespace UniversalWindowMod
             myMaterial = myRenderer.material;
             weather = GameManager.GetWeatherComponent();
             timeOfDay = GameManager.GetTimeOfDayComponent();
-            wind = GameManager.GetWindComponent(); // Retrieve the wind component from the game manager
+            wind = GameManager.GetWindComponent();
 
             vp1 = SetupVideoPlayer(out rt1);
             vp2 = SetupVideoPlayer(out rt2);
@@ -106,49 +104,40 @@ namespace UniversalWindowMod
             if (timeOfDay != null) lastGameHour = timeOfDay.GetHour() + (timeOfDay.GetMinutes() / 60f);
         }
 
-        // Determine the filename suffix based on wind intensity
         private string GetWindSuffix()
         {
             if (wind == null) return "";
 
-            // Get wind speed in MPH
-            // Note: Depending on the TLD version, this might be GetWindSpeedMPH() instead of GetSpeedMPH().
             float mph = wind.GetSpeedMPH();
+            if (mph >= 25f) return "_VeryWindy";
+            if (mph >= 12f) return "_Windy";
 
-            if (mph >= 25f) return "_VeryWindy"; // Severe storm/High wind
-            if (mph >= 12f) return "_Windy";     // Normal wind
-
-            return ""; // Calm weather
+            return "";
         }
 
-        // UPDATED: Added naming tolerance for the ClearAurora weather stage
         private string ResolveVideoPath(string wStage, bool isNightTime, string windSuffix, out bool isNightVariant)
         {
             isNightVariant = false;
             List<string> suffixesToTry = new List<string>();
 
-            // IF WEATHER IS AURORA: The recording system might have added the '_Night' suffix or left it plain. Scan all possibilities.
             if (wStage == "ClearAurora")
             {
                 if (!string.IsNullOrEmpty(windSuffix)) suffixesToTry.Add($"_Night{windSuffix}");
                 suffixesToTry.Add("_Night");
                 if (!string.IsNullOrEmpty(windSuffix)) suffixesToTry.Add($"{windSuffix}");
-                suffixesToTry.Add(""); // Standard/Fallback
+                suffixesToTry.Add("");
             }
-            // NIGHT CHECK FOR OTHER WEATHER CONDITIONS
             else if (isNightTime)
             {
                 if (!string.IsNullOrEmpty(windSuffix)) suffixesToTry.Add($"_Night{windSuffix}");
                 suffixesToTry.Add("_Night");
             }
-            // DAY CHECK
             else
             {
                 if (!string.IsNullOrEmpty(windSuffix)) suffixesToTry.Add($"{windSuffix}");
-                suffixesToTry.Add(""); // Standard/Fallback
+                suffixesToTry.Add("");
             }
 
-            // Check the list sequentially. If a windy video is missing, it automatically falls back to normal.
             foreach (string suffix in suffixesToTry)
             {
                 string webmPath = Path.GetFullPath(Path.Combine(sceneRootPath, wStage, $"Window_{windowIndex}{suffix}.webm"));
@@ -166,6 +155,7 @@ namespace UniversalWindowMod
             fadeScreen = GameObject.CreatePrimitive(PrimitiveType.Quad);
             fadeScreen.name = $"FadeScreen_{windowIndex}";
             fadeScreen.transform.SetParent(this.transform, false);
+
             fadeScreen.transform.localPosition = new Vector3(0, 0, -0.0005f);
             fadeScreen.transform.localRotation = Quaternion.identity;
             fadeScreen.transform.localScale = Vector3.one;
@@ -173,15 +163,14 @@ namespace UniversalWindowMod
             Destroy(fadeScreen.GetComponent("MeshCollider"));
 
             fadeRenderer = fadeScreen.GetComponent<MeshRenderer>();
-            Shader transparentShader = Shader.Find("Unlit/Transparent");
+
+            Shader transparentShader = Shader.Find("Legacy Shaders/Transparent");
             if (transparentShader == null) transparentShader = Shader.Find("UI/Default");
 
             fadeMaterial = new Material(transparentShader);
             fadeMaterial.mainTextureScale = myMaterial.mainTextureScale;
 
-            Color startColor = Color.white;
-            startColor.a = 0f;
-            fadeMaterial.color = startColor;
+            fadeMaterial.SetColor("_Color", new Color(1f, 1f, 1f, 0f));
 
             fadeRenderer.material = fadeMaterial;
             fadeRenderer.enabled = false;
@@ -233,11 +222,8 @@ namespace UniversalWindowMod
                     string gameWeather = GetCleanWeather();
                     string currentWindSuffix = GetWindSuffix();
 
-                    // Determine what the target video SHOULD be
                     string targetVideoPath = ResolveVideoPath(gameWeather, isNightTime, currentWindSuffix, out bool targetWillBeNight);
 
-                    // Trigger a transition if the target video is different from the currently playing one 
-                    // (e.g., if wind changed and a specific video exists)
                     if (targetVideoPath != currentPlayingVideoPath || gameWeather != playingWeather)
                     {
                         TriggerWeatherChange(gameWeather, targetVideoPath, targetWillBeNight);
@@ -264,30 +250,140 @@ namespace UniversalWindowMod
                     ActiveVp.Play();
             }
 
-            Color playingTint = GetTintForWeather(playingWeather, timeOfDay, playingIsNightVariant);
-            myMaterial.color = playingTint;
+            if (playingWeather == "ClearAurora")
+            {
+                myMaterial.EnableKeyword("_EMISSION");
+                myMaterial.SetColor("_EmissionColor", new Color(0.2f, 0.8f, 0.4f) * 1.5f);
+            }
+            else
+            {
+                myMaterial.DisableKeyword("_EMISSION");
+            }
 
+            float exteriorDaylight = 1.0f;
+            Color skyTint = Color.white; 
+            
+            Color nightBlue = new Color(0.15f, 0.2f, 0.35f); 
+
+            if (currentNumericHour >= 5.0f && currentNumericHour < 9.5f)
+            {
+                float t = (currentNumericHour - 5.0f) / 4.5f; 
+                
+                Color darkSunset = new Color(0.8f, 0.2f, 0.15f); 
+                Color dawnRed = new Color(1.2f, 0.4f, 0.3f); 
+                Color dawnOrange = new Color(1.0f, 0.6f, 0.3f); 
+
+                if (t < 0.15f) 
+                {
+                    float localT = t / 0.15f;
+                    skyTint = Color.Lerp(nightBlue, darkSunset, localT);
+                    exteriorDaylight = 0.1f; 
+                }
+                else if (t < 0.45f) 
+                {
+                    float localT = (t - 0.15f) / 0.30f;
+                    skyTint = Color.Lerp(darkSunset, dawnRed, localT);
+                    exteriorDaylight = Mathf.Lerp(0.1f, 0.6f, localT);
+                }
+                else if (t < 0.7f) 
+                {
+                    float localT = (t - 0.45f) / 0.25f;
+                    skyTint = Color.Lerp(dawnRed, dawnOrange, localT);
+                    exteriorDaylight = Mathf.Lerp(0.6f, 0.9f, localT);
+                }
+                else 
+                {
+                    float localT = (t - 0.7f) / 0.30f;
+                    skyTint = Color.Lerp(dawnOrange, Color.white, localT);
+                    exteriorDaylight = Mathf.Lerp(0.9f, 1.0f, localT);
+                }
+            }
+            else if (currentNumericHour >= 17.5f && currentNumericHour < 20.5f)
+            {
+                exteriorDaylight = Mathf.Lerp(1.0f, 0.1f, (currentNumericHour - 17.5f) / 3.0f);
+                float t = (currentNumericHour - 17.5f) / 3.0f;
+                Color sunsetRed = new Color(1.1f, 0.4f, 0.3f); 
+                
+                if (t < 0.5f) skyTint = Color.Lerp(Color.white, sunsetRed, t * 2f);
+                else skyTint = Color.Lerp(sunsetRed, nightBlue, (t - 0.5f) * 2f);
+            }
+            else if (currentNumericHour >= 20.5f || currentNumericHour < 5.0f)
+            {
+                exteriorDaylight = 0.1f; 
+                skyTint = nightBlue; 
+            }
+
+            Color ambientColor = RenderSettings.ambientLight;
+            float ambientLuminance = (ambientColor.r + ambientColor.g + ambientColor.b) / 3f;
+
+            float minBrightness = exteriorDaylight * 0.75f; 
+            float baseExposure = Mathf.Clamp(ambientLuminance * 1.5f, minBrightness, exteriorDaylight);
+
+            float colorCompensation = Mathf.Clamp(1.0f / Mathf.Max(0.2f, baseExposure), 1.0f, 2.0f);
+            Color compensatedSkyTint = skyTint * colorCompensation;
+
+            Color currentTint = compensatedSkyTint;
+            float currentExposure = baseExposure;
+
+            if (playingIsNightVariant)
+            {
+                currentTint = Color.Lerp(Color.white, compensatedSkyTint, 0.3f);
+                currentExposure = Mathf.Max(baseExposure, 0.85f);
+            }
+            else if (exteriorDaylight < 0.5f)
+            {
+                // DÜZELTME: Gündüz videosunun karanlıkta boğulmasını önlüyoruz.
+                // Çarpanı 0.3f'ten 0.4f'e çektik (renk çok kararmasın).
+                currentTint *= (exteriorDaylight + 0.4f);
+
+                // İŞTE KRİTİK NOKTA: Gündüz videosunun ışığı 0.80f'in altına düşemez.
+                // Böylece gece videosu (0.85f) girdiğinde parlaklık sıçraması yaşanmaz!
+                currentExposure = Mathf.Max(baseExposure, 0.80f);
+            }
+
+            Color targetTint = compensatedSkyTint;
+            float targetExposure = baseExposure;
+
+            if (targetIsNightVariant)
+            {
+                targetTint = Color.Lerp(Color.white, compensatedSkyTint, 0.3f);
+                targetExposure = Mathf.Max(baseExposure, 0.85f);
+            }
+            else if (exteriorDaylight < 0.5f)
+            {
+                // Aynı alt sınır korumasını yeni gelecek video için de yapıyoruz.
+                targetTint *= (exteriorDaylight + 0.4f);
+                targetExposure = Mathf.Max(baseExposure, 0.80f);
+            }
+
+            // 5. GEÇİŞ VE UYGULAMA
             if (isTransitioning && !isWaitingToPrepare)
             {
                 fadeTimer += Time.deltaTime;
                 float alphaProgress = Mathf.Clamp01(fadeTimer / transitionDuration);
 
-                Color targetTint = GetTintForWeather(targetWeather, timeOfDay, targetIsNightVariant);
-                targetTint.a = alphaProgress;
-                fadeMaterial.color = targetTint;
+                // İsimler düzeltildi: currentExposure ve targetExposure
+                float blendedExposure = Mathf.Lerp(currentExposure, targetExposure, alphaProgress);
+
+                // GEÇİŞ ESNASINDA: Karartmayı RGB'ye uyguluyoruz, Alpha'yı ise SADECE geçiş (1->0 ve 0->1) için kullanıyoruz.
+                Color fadeOldTint = new Color(currentTint.r * blendedExposure, currentTint.g * blendedExposure, currentTint.b * blendedExposure, 1f - alphaProgress);
+                myMaterial.SetColor("_Color", fadeOldTint);
+
+                Color fadeNewTint = new Color(targetTint.r * blendedExposure, targetTint.g * blendedExposure, targetTint.b * blendedExposure, alphaProgress);
+                fadeMaterial.SetColor("_Color", fadeNewTint);
 
                 if (alphaProgress >= 1f) CompleteTransition();
             }
+            else
+            {
+                // NORMAL OYNATIM ESNASINDA: 
+                // Alpha değerini her zaman KESİN olarak 1.0f (Tam Katı) yapıyoruz. 
+                // Karartma işlemini direkt RGB renklerinin şiddetini azaltarak uyguluyoruz.
+                Color finalSolidTint = new Color(currentTint.r * currentExposure, currentTint.g * currentExposure, currentTint.b * currentExposure, 1.0f);
+                myMaterial.SetColor("_Color", finalSolidTint);
+            }
 
             UpdateParallax();
-        }
-
-        private Color GetTintForWeather(string wStage, TimeOfDay tod, bool isNightVariantLoaded)
-        {
-            if (wStage == "ClearAurora") return new Color(1.2f, 1.2f, 1.3f, 1f);
-            if (isNightVariantLoaded) return Color.white;
-
-            return CalculateTintColor(tod, wStage);
         }
 
         private void StartPreparingNextVideo()
@@ -319,7 +415,6 @@ namespace UniversalWindowMod
 
             string newPath = ResolveVideoPath(newWeather, isNightTime, currentWind, out bool expectedNightVariant);
 
-            // If the currently playing video and the target video are identical, do nothing to save resources
             if (playingWeather == newWeather && currentPlayingVideoPath == newPath && !isTransitioning && !isWaitingToPrepare)
                 return;
 
@@ -342,11 +437,8 @@ namespace UniversalWindowMod
             PlayStandardWeather(newWeather, newPath, expectedNightVariant);
         }
 
-        // UPDATED: Now takes the targeted video path directly as a parameter
         private void TriggerWeatherChange(string newWeather, string targetVideoPath, bool targetNightVariant)
         {
-            // FIX: If a new trigger occurs while a soft transition is ongoing, wait for the current 
-            // transition to complete instead of updating abruptly. This prevents jarring screen cuts.
             if (isTransitioning || isWaitingToPrepare)
             {
                 return;
@@ -393,16 +485,15 @@ namespace UniversalWindowMod
 
             playingWeather = targetWeather;
             playingIsNightVariant = targetIsNightVariant;
-            currentPlayingVideoPath = NextVp.url; // New video is playing, save its path!
+            currentPlayingVideoPath = NextVp.url;
 
             NextVp.Stop();
             NextVp.url = string.Empty;
         }
 
-        // UPDATED: Now takes the targeted video path directly as a parameter
         private void PlayStandardWeather(string targetWeatherStage, string absoluteVideoPath, bool isNightVariant)
         {
-            currentPlayingVideoPath = absoluteVideoPath; // Save the currently playing path
+            currentPlayingVideoPath = absoluteVideoPath;
 
             if (string.IsNullOrEmpty(absoluteVideoPath))
             {
@@ -476,61 +567,6 @@ namespace UniversalWindowMod
             tex.Apply(false, true);
             return tex;
         }
-
-        private Color CalculateTintColor(TimeOfDay tod, string weatherStage)
-        {
-            float hour = tod.GetHour() + (tod.GetMinutes() / 60f);
-
-            Color dayColor = Color.white;
-            Color nightColor = new Color(0.08f, 0.12f, 0.20f, 1f);
-            Color dawnColor = new Color(0.85f, 0.50f, 0.30f, 1f);
-            Color duskColor = new Color(0.80f, 0.40f, 0.20f, 1f);
-
-            string lowerWeather = weatherStage.ToLower();
-
-            if (lowerWeather.Contains("fog") || lowerWeather.Contains("blizzard") || lowerWeather.Contains("heavysnow"))
-            {
-                dayColor = new Color(0.75f, 0.75f, 0.80f, 1f);
-                dawnColor = new Color(0.40f, 0.45f, 0.50f, 1f);
-                duskColor = new Color(0.35f, 0.40f, 0.45f, 1f);
-            }
-            else if (lowerWeather.Contains("cloudy") || lowerWeather.Contains("overcast"))
-            {
-                dayColor = new Color(0.9f, 0.9f, 0.9f, 1f);
-                dawnColor = Color.Lerp(dawnColor, Color.gray, 0.6f);
-                duskColor = Color.Lerp(duskColor, Color.gray, 0.6f);
-            }
-
-            if (hour >= 21.5f || hour < 5.0f) return nightColor;
-
-            if (hour >= 5.0f && hour < 7.5f)
-            {
-                float t = (hour - 5.0f) / 2.5f;
-                return Color.Lerp(nightColor, dawnColor, t);
-            }
-
-            if (hour >= 7.5f && hour < 10.0f)
-            {
-                float t = (hour - 7.5f) / 2.5f;
-                return Color.Lerp(dawnColor, dayColor, t);
-            }
-
-            if (hour >= 10.0f && hour < 15.5f) return dayColor;
-
-            if (hour >= 15.5f && hour < 18.5f)
-            {
-                float t = (hour - 15.5f) / 3.0f;
-                return Color.Lerp(dayColor, duskColor, t);
-            }
-
-            if (hour >= 18.5f && hour < 21.5f)
-            {
-                float t = (hour - 18.5f) / 3.0f;
-                return Color.Lerp(duskColor, nightColor, t);
-            }
-
-            return dayColor;
-        }
     }
 
     public class WindowModMain : MelonMod
@@ -562,17 +598,14 @@ namespace UniversalWindowMod
 
         public override void OnSceneWasInitialized(int buildIndex, string sceneName)
         {
-            // 1. Get the original scene name (e.g., SafeHouseA)
             string baseSceneName = sceneName.Replace("_SANDBOX", "").Replace("_DLC01", "").Replace("_WILDLIFE", "");
             string uniqueSceneId = baseSceneName;
 
-            // 2. Detect GUID (e.g., SafeHouseA_a8f9b...)
             if (GameManager.m_SceneTransitionData != null && !string.IsNullOrEmpty(GameManager.m_SceneTransitionData.m_SceneSaveFilenameCurrent))
             {
                 uniqueSceneId = GameManager.m_SceneTransitionData.m_SceneSaveFilenameCurrent;
             }
 
-            // 3. Check the GUID folder first; if there's no custom footage, fall back to the Base folder
             string currentSceneFolder = Path.Combine(baseTexturesFolderPath, uniqueSceneId);
             if (!Directory.Exists(currentSceneFolder))
             {
@@ -581,7 +614,6 @@ namespace UniversalWindowMod
 
             if (Directory.Exists(currentSceneFolder))
             {
-                // Send both names to prevent positioning issues
                 ReplaceWindowsInScene(currentSceneFolder, baseSceneName, uniqueSceneId);
             }
         }
@@ -619,7 +651,6 @@ namespace UniversalWindowMod
 
                 if (alreadyModded) { index++; continue; }
 
-                // Added uniqueSceneId to the function call
                 ModifySingleWindow(window, index, sceneFolderPath, baseSceneName, uniqueSceneId);
                 index++;
             }
@@ -673,11 +704,9 @@ namespace UniversalWindowMod
             myCustomScreen.transform.position = renderer.bounds.center;
             myCustomScreen.transform.rotation = windowObject.transform.rotation;
 
-            // Create override keys for both GUID and Base names
             string overrideKeyGuid = $"{uniqueSceneId}_{index}";
             string overrideKeyBase = $"{baseSceneName}_{index}";
 
-            // ROTATION CONTROL (To ensure custom settings, like those for Trapper's Cabin, are preserved)
             if (specificWindowRotations.ContainsKey(overrideKeyGuid))
                 myCustomScreen.transform.Rotate(specificWindowRotations[overrideKeyGuid], Space.Self);
             else if (specificWindowRotations.ContainsKey(overrideKeyBase))
@@ -694,21 +723,20 @@ namespace UniversalWindowMod
                 if (myCustomScreen.transform.up.y < 0) myCustomScreen.transform.Rotate(0, 0, 180, Space.Self);
             }
 
-            // OFFSET (POSITION) CONTROL
             if (specificWindowOffsets.ContainsKey(overrideKeyGuid))
                 myCustomScreen.transform.Translate(specificWindowOffsets[overrideKeyGuid], Space.Self);
             else if (specificWindowOffsets.ContainsKey(overrideKeyBase))
                 myCustomScreen.transform.Translate(specificWindowOffsets[overrideKeyBase], Space.Self);
 
-            // Scaling operations (remains the same as before)
             float finalX = 1.0f;
             float finalY = 1.0f;
 
             if (baseSceneName == "CampOffice")
             {
-                finalX = 1.4f; finalY = 1.5f;
-                if (index == 0) { finalX = -1.4f; finalY = -1.5f; }
-                else if (index == 2 || index == 5 || index == 7) { finalX = -1.4f; }
+                // Camp Office için yükseklik (Y) değerini 1.65'ten 1.85'e çıkardık.
+                finalX = 1.55f; finalY = 1.85f;
+                if (index == 0) { finalX = -1.55f; finalY = -1.85f; }
+                else if (index == 2 || index == 5 || index == 7) { finalX = -1.55f; }
             }
             else
             {
@@ -725,7 +753,12 @@ namespace UniversalWindowMod
                     if (sY < 0.05f) { h = sZ; w = sX; }
                     else if (sX < 0.05f) { w = sZ; h = sY; }
 
-                    finalX = w * 1.05f; finalY = h * 1.05f;
+                    // DÜZELTME BURADA:
+                    // Sağ/sol (X) için 1.15f (%15) yetti, onu koruyoruz.
+                    // Alt/üst (Y) için yetmemiş, onu 1.35f (%35) yaparak dikeyde iyice uzatıyoruz.
+                    finalX = w * 1.15f;
+                    finalY = h * 1.35f;
+
                     if (finalX < 0.1f) finalX = 1.0f;
                     if (finalY < 0.1f) finalY = 1.0f;
                 }
@@ -733,10 +766,10 @@ namespace UniversalWindowMod
 
             myCustomScreen.transform.localScale = new Vector3(finalX, finalY, 1f);
 
-            Shader shader = Shader.Find("UI/Default");
-            if (shader == null) shader = Shader.Find("Legacy Shaders/Diffuse");
+            Shader cleanShader = Shader.Find("Legacy Shaders/Transparent");
+            if (cleanShader == null) cleanShader = Shader.Find("UI/Default");
 
-            Material mat = new Material(shader);
+            Material mat = new Material(cleanShader);
             myCustomScreen.GetComponent<MeshRenderer>().material = mat;
 
             var controller = myCustomScreen.AddComponent<DynamicWindowController>();
